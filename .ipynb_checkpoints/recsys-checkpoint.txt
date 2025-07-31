@@ -1,0 +1,69 @@
+
+ipnyb to py
+jupyter nbconvert --to script recsys.ipynb
+
+streamlit
+streamlit run recsys.py
+
+import pandas as pd
+from surprise import SVD, Dataset, Reader
+from surprise.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import streamlit as st
+
+# Load datasets
+movies = pd.read_csv("movies.csv")
+ratings = pd.read_csv("ratings.csv")
+
+# Merge ratings with movies
+df = pd.merge(ratings, movies, on="movieId")
+
+# Drop timestamp column
+df.drop(columns=["timestamp"], inplace=True)
+
+# Compute average ratings
+avg_ratings = df.groupby("movieId")["rating"].mean().reset_index()
+movies = movies.merge(avg_ratings, on="movieId", how="left")
+movies["rating"].fillna(0, inplace=True)  # Fill missing ratings with 0
+
+# TF-IDF Vectorization for Content-Based Filtering
+tfidf = TfidfVectorizer(stop_words="english")
+tfidf_matrix = tfidf.fit_transform(movies["genres"].fillna(""))
+
+# Compute Similarity Matrix
+cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+# Get similar movies based on genres (Content-Based Filtering)
+def get_similar_movies(movie_id, top_n=5):
+    idx = movies[movies["movieId"] == movie_id].index[0]
+    sim_scores = list(enumerate(cosine_sim[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:top_n+1]
+    similar_movies = [(movies.iloc[i[0]]["title"], movies.iloc[i[0]]["rating"]) for i in sim_scores]
+    return similar_movies
+
+# Streamlit UI
+st.title("🎬 Movie Recommender System")
+
+# Movie Search Box
+search_query = st.text_input("Type a movie name:", placeholder="Enter movie name")
+
+# Filter movie titles based on search query
+filtered_movies = [movie for movie in movies["title"].sort_values().unique().tolist() if search_query.lower() in movie.lower()]
+
+if filtered_movies:
+    selected_movie = st.selectbox("Select a movie:", filtered_movies)
+else:
+    st.write("No results found.")
+    selected_movie = None
+
+if selected_movie:
+    movie_id = movies[movies["title"] == selected_movie]["movieId"].values[0]
+    avg_rating = movies[movies["title"] == selected_movie]["rating"].values[0]
+    st.write(f"⭐ **Average Rating:** {avg_rating:.2f}")
+
+    # Recommend Similar Movies
+    similar_movies = get_similar_movies(movie_id)
+    st.write("🔍 **Similar Movies:**")
+    for movie, rating in similar_movies:
+        st.write(f"🎥 {movie} - ⭐ {rating:.2f}")
